@@ -18,6 +18,10 @@
 #include "I2C/I2C.h"
 #include "LCD8/LCD8.h"
 
+// Configuración UART
+#define UART_BAUD_RATE 9600
+#define UART_UBRR (F_CPU / 16 / UART_BAUD_RATE - 1)
+
 #define Slave1 0x20		// Direccion Slave 1 (Sensor Ultrasonico)
 #define Slave2 0x22		// Direccion Slave 2 (Sensor de Metales)
 #define Slave3 0x48		// Direccion Slave 3 (Sensor de Temperatura LM75B con I2C)
@@ -30,17 +34,34 @@ uint16_t temp;
 uint16_t dato3;
 char buffer[30];	// Buffer para cadena de caracteres
 
+void uart_send_dato1(uint8_t data);
+void uart_send_dato2(uint8_t data);
+void uart_send_temp(uint16_t temp);
 
+void uart_init(void) {
+	// Configuración de los pines de UART
+	DDRD |= (1 << DDD1); // Pin TX como salida
+	DDRD &= ~(1 << DDD0); // Pin RX como entrada
+	
+	UBRR0H = (UART_UBRR >> 8);
+	UBRR0L = UART_UBRR;
+	UCSR0B = (1 << TXEN0) | (1 << RXEN0);
+	UCSR0C = (1 << UCSZ01) | (1 << UCSZ00);
+}
 
+void uart_send_char(uint8_t data) {
+	while (!(UCSR0A & (1 << UDRE0)));
+	UDR0 = data;
+}
 
 int main(void)
 {
-    cli();
+	cli();
 	
 	DDRD = 0xFF;	// Puerto D como Output (LCD)
 	DDRB = 0xFF;	// Puerto B como Output
 	
-	UCSR0B = 0;		// Usar los pines TX y RX como digitales
+	//UCSR0B = 0;		// Usar los pines TX y RX como digitales
 	Lcd_Clear();
 	Lcd_Init8bits();
 	Lcd_Clear();
@@ -48,8 +69,11 @@ int main(void)
 	
 	sei();
 	
-    while (1) 
-    {
+	uart_init();
+
+	
+	while (1)
+	{
 		_delay_ms(10);
 		
 		// Menu a mostrar en la LCD
@@ -61,7 +85,7 @@ int main(void)
 		Lcd_Write_String("S3: ");
 		
 		
-	
+		
 		dato1 = I2C_read_data(Slave1, &dato1); // Lee dato del Slave 1 y lo almacena en la variable
 		dato2 = I2C_read_data(Slave2, &dato2);	// Lee dato del Slave 2 y lo almacena en la variable
 		
@@ -78,10 +102,10 @@ int main(void)
 		Lcd_Set_Cursor(1,0);
 		snprintf(buffer,sizeof(buffer), "%03d", dato1);	// Convierte los datos en una cadena de caracteres
 		Lcd_Write_String(buffer);
-	
+		
 		
 		dato3 = I2C_read_data_16bits(Slave3, &dato3);
-		temp = dato3/256;	
+		temp = dato3/256;
 		
 		// Muestra la lectura en LCD
 		Lcd_Set_Cursor(1,13);
@@ -91,11 +115,28 @@ int main(void)
 		// Envia el valor de la temperatura al esclavo
 		I2C_esclavo(&temp, Slave2);
 		
-		// Envia los tres datos de los sensores al esp32
-		I2C_esclavo(dato1, Slave4);		// Envia dato de sensor ultrasonico a esp32
-		I2C_esclavo(dato2, Slave4);		// Envia dato de sensor de metales a esp32
-		I2C_esclavo(temp, Slave4);		// Envia dato de sensor de temperatura a esp32
-    }
+		// Envía los datos de los sensores al ESP32
+		uart_send_dato1(dato1);
+		uart_send_dato2(dato2);
+		uart_send_temp(temp);
+
+		_delay_ms(10);
+	}
+}
+
+void uart_send_dato1(uint8_t data) {
+	uart_send_char('a');	// Identificador de inicio del dato1 (sensor ultrasonico)
+	uart_send_char(data);
+}
+
+void uart_send_dato2(uint8_t data) {
+	uart_send_char('b'); // Identificador de inicio del dato 2 (sensor de metales)
+	uart_send_char(data);
+}
+
+void uart_send_temp(uint16_t temp) {
+	uart_send_char('T'); // Identificador de inicio de temperatura
+	uart_send_char(temp);
 }
 
 
